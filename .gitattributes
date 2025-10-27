@@ -1,7 +1,2 @@
-print('hello my name is raymond')
-print('now if i make a change')
-print('does it change automatically?')if
-
-
-no then make mistake?
-i 
+diceRoll <- RANDOM(1, 6)
+output "You rolled a " + diceRoll
