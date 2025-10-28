@@ -1,2 +1,1 @@
-diceRoll <- RANDOM(1, 6)
-output "You rolled a " + diceRoll
+print('hello')
