@@ -9,8 +9,8 @@ elif age >= 13 and age <= 17:
     price = 7
 elif age >= 65:
     price = 6
-else:
-    price = 10  
+else:a
+price = 10  
 
 
 has_student_id = input("Do you have a student ID? (yes/no): ").lower()
