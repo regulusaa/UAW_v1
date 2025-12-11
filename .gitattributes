@@ -1,2 +1,3 @@
-print('I like chinese')
-print('its really good')
+#VARIABLES
+
+#variable = container for a value (str, int, float, boolean)
