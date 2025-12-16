@@ -1,3 +1,149 @@
-#VARIABLES
+import pandas as pd
+import numpy as np
+import yfinance as yf
+from scipy.stats import zscore
+import matplotlib.pyplot as plt
 
-#variable = container for a value (str, int, float, boolean)
+
+def wharton_alpha_engine_v3(
+    tickers,
+    market='SPY',
+    rf=0.02,
+    period='6mo',
+    min_vol=25_000_000
+):
+    """
+    Wharton Alpha Engine 3.0
+    Calculates factor metrics, assigns sector via correlation,
+    applies z-scored weighting system and outputs a ranking table.
+    """
+
+    # Sector ETF mapping
+    sector_map = {
+        'XBI': 'Healthcare/Biotech',
+        'SMH': 'Semiconductors',
+        'QQQ': 'Tech/Growth',
+        'XLE': 'Energy',
+        'XLI': 'Industrials',
+        'IWD': 'Value',
+        'SPY': 'Broad Market'
+    }
+
+    sector_etfs = list(sector_map.keys())
+
+    # Download all required tickers
+    all_tickers = tickers + [market] + sector_etfs
+    data = yf.download(all_tickers, period=period)
+
+    prices = data['Adj Close']
+    volumes = data['Volume']
+
+    # Daily returns
+    returns = prices.pct_change().dropna()
+    market_ret = returns[market]
+
+    # Compute sector momentum (5-day)
+    sector_momentum = {}
+    for s in sector_etfs:
+        recent = prices[s].iloc[-5:]
+        momentum = (recent.iloc[-1] / recent.iloc[0] - 1) * 100
+        sector_momentum[s] = momentum
+
+    results = []
+
+    for t in tickers:
+        # Beta calculation
+        cov = np.cov(returns[t], market_ret)[0][1]
+        var_mkt = np.var(market_ret)
+
+        beta = cov / var_mkt if var_mkt != 0 else np.nan
+
+        # Annualized metrics
+        exp_return = returns[t].mean() * 252
+        vol = returns[t].std() * np.sqrt(252)
+        mkt_return = market_ret.mean() * 252
+
+        # Jensen Alpha
+        alpha = exp_return - (rf + beta * (mkt_return - rf))
+
+        # Sharpe
+        sharpe = (exp_return - rf) / vol if vol != 0 else np.nan
+
+        # Dollar volume
+        avg_dollar_vol = (volumes[t] * prices[t]).fillna(0).mean()
+
+        # Sector classification via correlation
+        corr_scores = {
+            s: returns[t].corr(returns[s])
+            for s in sector_etfs
+        }
+
+        sector = max(corr_scores, key=corr_scores.get)
+        sector_mom = sector_momentum[sector]
+        sector_name = sector_map[sector]
+
+        # Add result row
+        results.append([
+            t,
+            sector_name,
+            alpha,
+            beta,
+            sharpe,
+            exp_return * 100,
+            vol * 100,
+            avg_dollar_vol,
+            sector_mom
+        ])
+
+    # Build DataFrame
+    df = pd.DataFrame(results, columns=[
+        'Symbol', 'Sector', 'Alpha', 'Beta', 'Sharpe',
+        'ExpReturn%', 'Volatility%', 'AvgVolume', 'SectorMomentum%'
+    ])
+
+    # Liquidity + Sharpe screening
+    df = df[df['AvgVolume'] > min_vol].copy()
+    df = df[df['Sharpe'] > 0].copy()
+
+    # Z-scores
+    for c in ['Alpha', 'Sharpe', 'ExpReturn%', 'Volatility%',
+              'AvgVolume', 'SectorMomentum%']:
+        df[c + '_z'] = zscore(df[c])
+
+    # Weighted composite score
+    df['WhartonScore'] = (
+        0.30 * df['Sharpe_z'] +
+        0.25 * df['Alpha_z'] +
+        0.20 * df['ExpReturn%_z'] +
+        0.10 * df['AvgVolume_z'] +
+        0.10 * df['SectorMomentum%_z'] -
+        0.05 * df['Volatility%_z']
+    )
+
+    df = df.sort_values('WhartonScore', ascending=False).reset_index(drop=True)
+
+    # Display results
+    print("\n=== Wharton Alpha Engine 3.0 Results ===")
+    print(df[['Symbol', 'Sector', 'Alpha', 'Beta', 'Sharpe',
+              'ExpReturn%', 'Volatility%', 'AvgVolume',
+              'SectorMomentum%', 'WhartonScore']].head(10))
+
+    # Plot
+    plt.figure(figsize=(9, 6))
+    plt.scatter(
+        df['Beta'],
+        df['Sharpe'],
+        s=df['AvgVolume'] / 1e7,
+        alpha=0.6,
+        c=df['WhartonScore'],
+        cmap='viridis'
+    )
+    plt.xlabel('Beta')
+    plt.ylabel('Sharpe')
+    plt.title('Sharpe vs Beta — Wharton Alpha Engine 3.0')
+    plt.grid(True)
+    plt.colorbar(label='WhartonScore')
+    plt.show()
+
+    return df
+
